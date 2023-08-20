@@ -1,0 +1,80 @@
+name: Deploy WordPress Theme to Kinsta
+
+on:
+  push:
+    branches: [main, staging, dev]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Composer Packages
+        uses: php-actions/composer@v6
+        with:
+          php_version: 7.4.29
+
+      - name: Setup Node.js 14.x
+        uses: actions/setup-node@v3
+        with:
+          node-version: 14.x
+          cache: "yarn"
+
+      - name: Install dependencies
+        run: yarn
+
+      - name: Build files
+        run: yarn build
+
+      - name: Install zip
+        uses: montudor/action-zip@v1
+
+      - name: Zip output
+        run: zip -qq -r theme.zip * -x ".*" "node_modules/*" "*.md*" "*.log*" "*.json*" "*.lock*" "DOCKER_ENV" "docker_tag"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: theme
+          path: theme.zip
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: theme
+
+      - uses: montudor/action-zip@v1
+        with:
+          args: unzip -qq -o theme.zip -d .
+
+      - name: Remove theme.zip
+        run: rm theme.zip
+
+      - name: Deploy to staging
+        if: github.ref == 'refs/heads/staging'
+        uses: easingthemes/ssh-deploy@v4.1.8
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.STAGING_PRIVATE_KEY }}
+          REMOTE_HOST: ${{ secrets.SERVER }}
+          REMOTE_USER: ${{ secrets.USERNAME }}
+          REMOTE_PORT: ${{ secrets.STAGING_PORT }}
+          TARGET: ${{ secrets.STAGING_DIR }}
+          ARGS: "-rlgoDzvc -i --delete"
+
+      - name: Deploy to production
+        if: github.ref == 'refs/heads/main'
+        uses: easingthemes/ssh-deploy@v4.1.8
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.PROD_PRIVATE_KEY }}
+          REMOTE_HOST: ${{ secrets.SERVER }}
+          REMOTE_USER: ${{ secrets.USERNAME }}
+          REMOTE_PORT: ${{ secrets.PRODUCTION_PORT }}
+          TARGET: ${{ secrets.PRODUCTION_DIR }}
+          ARGS: "-rlgoDzvc -i --delete"
